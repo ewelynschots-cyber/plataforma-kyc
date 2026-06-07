@@ -1,152 +1,72 @@
-from flask import request, jsonify
+import logging
+from flask import Flask, request, jsonify, Blueprint
 from flask_restx import Api, Resource, fields, Namespace
 from src import db
-from src.models import Customer, KYCProcess
+from src.models import Customer, KycProcess
+from src.services.address_alert_service import check_address_duplicates, calculate_risk_level, get_duplicate_customers, create_alert
 
-# Criar namespace
-api_ns = Namespace('api', description='KYC Platform API')
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Definir modelos Swagger
-customer_model = api_ns.model('Customer', {
-    'id': fields.Integer(readonly=True),
-    'name': fields.String(required=True),
-    'email': fields.String(required=True),
-    'phone': fields.String(),
-    'created_at': fields.String(readonly=True),
-    'updated_at': fields.String(readonly=True)
-})
-
-kyc_model = api_ns.model('KYCProcess', {
-    'id': fields.Integer(readonly=True),
-    'customer_id': fields.Integer(required=True),
-    'status': fields.String(required=True),
-    'document_type': fields.String(),
-    'document_number': fields.String(),
-    'created_at': fields.String(readonly=True),
-    'updated_at': fields.String(readonly=True)
-})
-
-# ============ CUSTOMERS ============
-
-@api_ns.route('/customers')
-class CustomerList(Resource):
-    @api_ns.doc('list_customers')
-    def get(self):
-        """Listar todos os clientes"""
-        customers = Customer.query.all()
-        return {'customers': [c.to_dict() for c in customers]}, 200
+def create_app():
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///kyc.db'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
-    @api_ns.expect(customer_model)
-    @api_ns.marshal_with(customer_model, code=201)
-    def post(self):
-        """Criar novo cliente"""
-        data = request.get_json()
-        
-        # Validar email único
-        if Customer.query.filter_by(email=data['email']).first():
-            return {'error': 'Email já existe'}, 400
-        
-        customer = Customer(
-            name=data['name'],
-            email=data['email'],
-            phone=data.get('phone')
-        )
-        db.session.add(customer)
-        db.session.commit()
-        return customer.to_dict(), 201
-
-@api_ns.route('/customers/<int:id>')
-class CustomerDetail(Resource):
-    @api_ns.doc('get_customer')
-    def get(self, id):
-        """Obter cliente por ID"""
-        customer = Customer.query.get_or_404(id)
-        return customer.to_dict(), 200
+    db.init_app(app)
     
-    @api_ns.expect(customer_model)
-    def put(self, id):
-        """Atualizar cliente"""
-        customer = Customer.query.get_or_404(id)
-        data = request.get_json()
-        
-        customer.name = data.get('name', customer.name)
-        customer.email = data.get('email', customer.email)
-        customer.phone = data.get('phone', customer.phone)
-        
-        db.session.commit()
-        return customer.to_dict(), 200
+    api_bp = Blueprint('api', __name__, url_prefix='/api')
+    api = Api(api_bp, version='1.0', title='KYC API', doc='/docs')
     
-    def delete(self, id):
-        """Deletar cliente"""
-        customer = Customer.query.get_or_404(id)
-        db.session.delete(customer)
-        db.session.commit()
-        return {'message': 'Cliente deletado'}, 200
-
-# ============ KYC PROCESSES ============
-
-@api_ns.route('/kyc-processes')
-class KYCProcessList(Resource):
-    @api_ns.doc('list_kyc_processes')
-    def get(self):
-        """Listar todos os processos KYC"""
-        processes = KYCProcess.query.all()
-        return {'kyc_processes': [p.to_dict() for p in processes]}, 200
+    customers_ns = Namespace('customers', description='Customer operations')
+    kyc_ns = Namespace('kyc-processes', description='KYC process operations')
     
-    @api_ns.expect(kyc_model)
-    @api_ns.marshal_with(kyc_model, code=201)
-    def post(self):
-        """Criar novo processo KYC"""
-        data = request.get_json()
-        
-        # Validar se cliente existe
-        customer = Customer.query.get(data['customer_id'])
-        if not customer:
-            return {'error': 'Cliente não encontrado'}, 404
-        
-        kyc = KYCProcess(
-            customer_id=data['customer_id'],
-            status=data.get('status', 'pending'),
-            document_type=data.get('document_type'),
-            document_number=data.get('document_number')
-        )
-        db.session.add(kyc)
-        db.session.commit()
-        return kyc.to_dict(), 201
+    api.add_namespace(customers_ns)
+    api.add_namespace(kyc_ns)
 
-@api_ns.route('/kyc-processes/<int:id>')
-class KYCProcessDetail(Resource):
-    @api_ns.doc('get_kyc_process')
-    def get(self, id):
-        """Obter processo KYC por ID"""
-        kyc = KYCProcess.query.get_or_404(id)
-        return kyc.to_dict(), 200
-    
-    @api_ns.expect(kyc_model)
-    def put(self, id):
-        """Atualizar processo KYC"""
-        kyc = KYCProcess.query.get_or_404(id)
-        data = request.get_json()
-        
-        kyc.status = data.get('status', kyc.status)
-        kyc.document_type = data.get('document_type', kyc.document_type)
-        kyc.document_number = data.get('document_number', kyc.document_number)
-        
-        db.session.commit()
-        return kyc.to_dict(), 200
-    
-    def delete(self, id):
-        """Deletar processo KYC"""
-        kyc = KYCProcess.query.get_or_404(id)
-        db.session.delete(kyc)
-        db.session.commit()
-        return {'message': 'Processo KYC deletado'}, 200
+    customer_model = api.model('Customer', {'id': fields.Integer, 'name': fields.String, 'address': fields.String})
+    kyc_model = api.model('KycProcess', {'id': fields.Integer, 'customer_id': fields.Integer, 'status': fields.String})
+    alert_model = api.model('Alert', {'risk_level': fields.String, 'duplicates': fields.List(fields.Integer)})
 
-# Criar blueprint
-from flask import Blueprint
-api_bp = Blueprint('api', __name__, url_prefix='/api')
+    @customers_ns.route('/')
+    class CustomerList(Resource):
+        def get(self):
+            return [c.to_dict() for c in Customer.query.all()]
+        @customers_ns.expect(customer_model)
+        def post(self):
+            data = request.json
+            new_c = Customer(**data)
+            db.session.add(new_c)
+            db.session.commit()
+            return new_c.to_dict(), 201
 
-# Registrar API
-api = Api(api_bp, version='1.0.0', title='Plataforma KYC API',
-          description='API para gerenciamento de processos KYC')
-api.add_namespace(api_ns)
+    @customers_ns.route('/<int:id>')
+    class CustomerDetail(Resource):
+        def get(self, id):
+            customer = Customer.query.get_or_404(id)
+            try:
+                duplicates = get_duplicate_customers(customer.address)
+                if len(duplicates) > 1:
+                    risk = calculate_risk_level(duplicates)
+                    alert = create_alert(customer.id, risk, duplicates)
+                    return {'customer': customer.to_dict(), 'address_alert': alert}
+                return {'customer': customer.to_dict(), 'address_alert': None}
+            except Exception as e:
+                logger.error(f'Error processing alerts: {e}')
+                return {'customer': customer.to_dict(), 'address_alert': None}
+
+    @kyc_ns.route('/')
+    class KycList(Resource):
+        def get(self):
+            return [k.to_dict() for k in KycProcess.query.all()]
+        def post(self):
+            data = request.json
+            new_k = KycProcess(**data)
+            db.session.add(new_k)
+            db.session.commit()
+            return new_k.to_dict(), 201
+
+    app.register_blueprint(api_bp)
+    return app
+
+app = create_app()

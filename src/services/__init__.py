@@ -1,6 +1,3 @@
-"""
-Pacote principal da plataforma KYC
-"""
+from flask_sqlalchemy import SQLAlchemy
 
-__version__ = '0.1.0'
-__author__ = 'Dra. Ewelyn Schots'
+db = SQLAlchemy()

@@ -44,3 +44,46 @@ class KYCProcess(db.Model):
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
+    from datetime import datetime
+from sqlalchemy import Column, Integer, String, DateTime, JSON
+
+class AddressAlert(db.Model):
+    """
+    Modelo para armazenar alertas de endereços com múltiplos clientes associados.
+    """
+    __tablename__ = 'address_alerts'
+
+    # Identificador único do alerta
+    id = Column(Integer, primary_key=True)
+    
+    # Endereço para monitoramento, indexado para otimizar consultas de busca
+    address = Column(String(255), nullable=False, index=True)
+    
+    # Contador de clientes vinculados a este endereço
+    customer_count = Column(Integer, default=0)
+    
+    # Nível de risco associado ao endereço (LOW, MEDIUM, HIGH)
+    risk_level = Column(String(20), default='LOW')
+    
+    # Lista de IDs de clientes que compartilham o mesmo endereço
+    duplicate_customer_ids = Column(JSON, nullable=True)
+    
+    # Timestamps de criação e atualização automática
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        """Retorna uma representação em dicionário do objeto."""
+        return {
+            'id': self.id,
+            'address': self.address,
+            'customer_count': self.customer_count,
+            'risk_level': self.risk_level,
+            'duplicate_customer_ids': self.duplicate_customer_ids,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+    def __repr__(self):
+        """Representação para debug."""
+        return f'<AddressAlert {self.address} (Risk: {self.risk_level})>'

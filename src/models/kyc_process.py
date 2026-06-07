@@ -1,4 +1,4 @@
-from src.app import db
+from src import db
 from enum import Enum
 
 class KycStatus(Enum):
