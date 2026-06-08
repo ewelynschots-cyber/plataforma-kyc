@@ -16,7 +16,7 @@ def create_app():
     db.init_app(app)
     
     api_bp = Blueprint('api', __name__, url_prefix='/api')
-    api = Api(api_bp, version='1.0', title='KYC API', doc='/docs')
+    api = Api(api_bp, version='1.0', title='RegTech Authority API', doc='/docs')
     
     customers_ns = Namespace('customers', description='Customer operations')
     kyc_ns = Namespace('kyc-processes', description='KYC process operations')
